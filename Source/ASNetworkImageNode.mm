@@ -773,7 +773,7 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
             [strongSelf _setCurrentImageQuality:1.0];
             NSData *animatedImageData = [imageContainer asdk_animatedImageData];
             if (animatedImageData && strongSelf->_downloaderFlags.downloaderImplementsAnimatedImage) {
-              id newAnimateImage = [strongSelf->_downloader animatedImageWithData:animatedImageData];
+              newAnimateImage = [strongSelf->_downloader animatedImageWithData:animatedImageData];
               [strongSelf _locked_setAnimatedImage:newAnimateImage];
             } else {
               newImage = [imageContainer asdk_image];

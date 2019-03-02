@@ -212,6 +212,28 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (void)imageNode:(ASNetworkImageNode *)imageNode didLoadImage:(UIImage *)image;
 
+  /**
+   * Notification that the image node finished downloading an image, with additional info.
+   * If implemented, this method will be called instead of `imageNode:didLoadAnimatedImage:`.
+   *
+   * @param imageNode The sender.
+   * @param image The newly-loaded animated image.
+   * @param info Additional information about the image load.
+   *
+   * @discussion Called on the main thread if useMainThreadDelegateCallbacks=YES (the default), otherwise on a background thread.
+   */
+- (void)imageNode:(ASNetworkImageNode *)imageNode didLoadAnimatedImage:(id <ASAnimatedImageProtocol>)image info:(ASNetworkImageLoadInfo *)info;
+
+  /**
+   * Notification that the image node finished downloading an image.
+   *
+   * @param imageNode The sender.
+   * @param image The newly-loaded animated image.
+   *
+   * @discussion Called on the main thread if useMainThreadDelegateCallbacks=YES (the default), otherwise on a background thread.
+   */
+- (void)imageNode:(ASNetworkImageNode *)imageNode didLoadAnimatedImage:(id <ASAnimatedImageProtocol>)image;
+
 /**
  * Notification that the image node failed to download the image.
  *

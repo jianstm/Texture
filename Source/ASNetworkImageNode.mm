@@ -58,6 +58,8 @@
     unsigned int delegateDidLoadImage:1;
     unsigned int delegateDidLoadImageFromCache:1;
     unsigned int delegateDidLoadImageWithInfo:1;
+    unsigned int delegateDidLoadAnimatedImage: 1;
+    unsigned int delegateDidLoadAnimatedImageWithInfo: 1;
   } _delegateFlags;
 
   
@@ -310,6 +312,8 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
   _delegateFlags.delegateDidLoadImage = [delegate respondsToSelector:@selector(imageNode:didLoadImage:)];
   _delegateFlags.delegateDidLoadImageFromCache = [delegate respondsToSelector:@selector(imageNodeDidLoadImageFromCache:)];
   _delegateFlags.delegateDidLoadImageWithInfo = [delegate respondsToSelector:@selector(imageNode:didLoadImage:info:)];
+  _delegateFlags.delegateDidLoadAnimatedImage = [delegate respondsToSelector:@selector(imageNode:didLoadAnimatedImage:)];
+  _delegateFlags.delegateDidLoadAnimatedImageWithInfo = [delegate respondsToSelector:@selector(imageNode:didLoadAnimatedImage:info:)];
 }
 
 - (id<ASNetworkImageNodeDelegate>)delegate
@@ -359,20 +363,38 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
 
     NSURL *url = _URL;
     if (_imageLoaded == NO && url && _downloadIdentifier == nil) {
-      UIImage *result = [[_cache synchronouslyFetchedCachedImageWithURL:url] asdk_image];
-      if (result) {
+      id<ASImageContainerProtocol> imageContainer = [_cache synchronouslyFetchedCachedImageWithURL: url];
+
+      id<ASAnimatedImageProtocol> animatedImage = [self->_downloader animatedImageWithData:[imageContainer asdk_animatedImageData]];
+      if (animatedImage) {
         [self _setCurrentImageQuality:1.0];
-        [self _locked__setImage:result];
+        [self _locked_setAnimatedImage:animatedImage];
         _imageLoaded = YES;
-        
-        // Call out to the delegate.
-        if (_delegateFlags.delegateDidLoadImageWithInfo) {
+
+        if (_delegateFlags.delegateDidLoadAnimatedImageWithInfo) {
           ASUnlockScope(self);
           const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:url sourceType:ASNetworkImageSourceSynchronousCache downloadIdentifier:nil userInfo:nil];
-          [delegate imageNode:self didLoadImage:result info:info];
-        } else if (_delegateFlags.delegateDidLoadImage) {
+          [delegate imageNode:self didLoadAnimatedImage:animatedImage info:info];
+        } else if (_delegateFlags.delegateDidLoadAnimatedImage) {
           ASUnlockScope(self);
-          [delegate imageNode:self didLoadImage:result];
+          [delegate imageNode:self didLoadAnimatedImage:animatedImage];
+        }
+      } else {
+        UIImage *image = [[_cache synchronouslyFetchedCachedImageWithURL:url] asdk_image];
+        if (image) {
+          [self _setCurrentImageQuality:1.0];
+          [self _locked__setImage:image];
+          _imageLoaded = YES;
+
+          // Call out to the delegate.
+          if (_delegateFlags.delegateDidLoadImageWithInfo) {
+            ASUnlockScope(self);
+            const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:url sourceType:ASNetworkImageSourceSynchronousCache downloadIdentifier:nil userInfo:nil];
+            [delegate imageNode:self didLoadImage:image info:info];
+          } else if (_delegateFlags.delegateDidLoadImage) {
+            ASUnlockScope(self);
+            [delegate imageNode:self didLoadImage:image];
+          }
         }
       }
     }
@@ -656,6 +678,8 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
         if (!ASObjectIsEqual(URL, self->_URL)) {
           return;
         }
+
+        BOOL isAnimatedImage = NO;
         
         if (self->_shouldCacheImage) {
           [self _locked__setImage:[UIImage imageNamed:URL.path.lastPathComponent]];
@@ -686,6 +710,7 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
           }
 
           if (animatedImage != nil) {
+            isAnimatedImage = YES;
             [self _locked_setAnimatedImage:animatedImage];
           } else {
             [self _locked__setImage:nonAnimatedImage];
@@ -696,13 +721,24 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
 
         [self _setCurrentImageQuality:1.0];
 
-        if (self->_delegateFlags.delegateDidLoadImageWithInfo) {
-          ASUnlockScope(self);
-          const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:URL sourceType:ASNetworkImageSourceFileURL downloadIdentifier:nil userInfo:nil];
-          [delegate imageNode:self didLoadImage:self.image info:info];
-        } else if (self->_delegateFlags.delegateDidLoadImage) {
-          ASUnlockScope(self);
-          [delegate imageNode:self didLoadImage:self.image];
+        if (isAnimatedImage) {
+          if (self->_delegateFlags.delegateDidLoadAnimatedImageWithInfo) {
+            ASUnlockScope(self);
+            const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:URL sourceType:ASNetworkImageSourceFileURL downloadIdentifier:nil userInfo:nil];
+            [delegate imageNode:self didLoadAnimatedImage:self.animatedImage info:info];
+          } else if (self->_delegateFlags.delegateDidLoadAnimatedImage) {
+            ASUnlockScope(self);
+            [delegate imageNode:self didLoadAnimatedImage:self.animatedImage];
+          }
+        } else {
+          if (self->_delegateFlags.delegateDidLoadImageWithInfo) {
+            ASUnlockScope(self);
+            const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:URL sourceType:ASNetworkImageSourceFileURL downloadIdentifier:nil userInfo:nil];
+            [delegate imageNode:self didLoadImage:self.image info:info];
+          } else if (self->_delegateFlags.delegateDidLoadImage) {
+            ASUnlockScope(self);
+            [delegate imageNode:self didLoadImage:self.image];
+          }
         }
       });
     } else {
@@ -732,12 +768,13 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
           }
           
           UIImage *newImage;
+          id <ASAnimatedImageProtocol> newAnimateImage;
           if (imageContainer != nil) {
             [strongSelf _setCurrentImageQuality:1.0];
             NSData *animatedImageData = [imageContainer asdk_animatedImageData];
             if (animatedImageData && strongSelf->_downloaderFlags.downloaderImplementsAnimatedImage) {
-              id animatedImage = [strongSelf->_downloader animatedImageWithData:animatedImageData];
-              [strongSelf _locked_setAnimatedImage:animatedImage];
+              id newAnimateImage = [strongSelf->_downloader animatedImageWithData:animatedImageData];
+              [strongSelf _locked_setAnimatedImage:newAnimateImage];
             } else {
               newImage = [imageContainer asdk_image];
               [strongSelf _locked__setImage:newImage];
@@ -749,8 +786,19 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
           strongSelf->_cacheSentinel++;
           
           void (^calloutBlock)(ASNetworkImageNode *inst);
-          
-          if (newImage) {
+
+          if (newAnimateImage) {
+            if (strongSelf->_delegateFlags.delegateDidLoadAnimatedImageWithInfo) {
+              calloutBlock = ^(ASNetworkImageNode *strongSelf) {
+                const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:URL sourceType:imageSource downloadIdentifier:downloadIdentifier userInfo:userInfo];
+                [delegate imageNode:strongSelf didLoadAnimatedImage:newAnimateImage info:info];
+              };
+            } else if (strongSelf->_delegateFlags.delegateDidLoadAnimatedImage) {
+              calloutBlock = ^(ASNetworkImageNode *strongSelf) {
+                [delegate imageNode:strongSelf didLoadAnimatedImage:newAnimateImage];
+              };
+            }
+          } else if (newImage) {
             if (strongSelf->_delegateFlags.delegateDidLoadImageWithInfo) {
               calloutBlock = ^(ASNetworkImageNode *strongSelf) {
                 const auto info = [[ASNetworkImageLoadInfo alloc] initWithURL:URL sourceType:imageSource downloadIdentifier:downloadIdentifier userInfo:userInfo];
